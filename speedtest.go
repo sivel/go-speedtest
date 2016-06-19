@@ -47,6 +47,17 @@ func errorf(text string, a ...interface{}) {
 	os.Exit(1)
 }
 
+// Established connection with local address and timeout support
+func dialTimeout(network string, laddr *net.TCPAddr, raddr *net.TCPAddr, timeout time.Duration) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout:   timeout,
+		LocalAddr: laddr,
+	}
+
+	conn, err := dialer.Dial(network, raddr.String())
+	return conn, err
+}
+
 type CliFlags struct {
 	List        bool
 	Server      int
@@ -55,6 +66,8 @@ type CliFlags struct {
 	Xml         bool
 	Csv         bool
 	Simple      bool
+	Source      string
+	Timeout     int64
 }
 
 func NewCliFlags() *CliFlags {
@@ -128,6 +141,8 @@ type Speedtest struct {
 	Servers       *Servers
 	CliFlags      *CliFlags
 	Results       *Results
+	Source        *net.TCPAddr
+	Timeout       time.Duration
 }
 
 func NewSpeedtest() *Speedtest {
@@ -170,14 +185,11 @@ func (s *Speedtest) GetServers(serverId int) (*Servers, error) {
 	res.Body.Close()
 	var allServers Servers
 	xml.Unmarshal(serversBody, &allServers)
-	if serverId != 0 {
-		for _, server := range allServers.Servers {
-			if server.ID == serverId {
-				s.Servers.Servers = append(s.Servers.Servers, server)
-			}
+	for _, server := range allServers.Servers {
+		server.speedtest = s
+		if serverId == 0 || server.ID == serverId {
+			s.Servers.Servers = append(s.Servers.Servers, server)
 		}
-	} else {
-		s.Servers = &allServers
 	}
 
 	return s.Servers, nil
@@ -241,6 +253,7 @@ type Server struct {
 	Distance  float64       `xml:"distance,attr" json:"distance"`
 	Latency   time.Duration `xml:"latency,attr" json:"latency"`
 	speedtest *Speedtest
+	tcpAddr   *net.TCPAddr
 }
 
 type Servers struct {
@@ -316,8 +329,16 @@ func (s *Servers) TestLatency() *Server {
 	}
 
 	for i, server := range servers {
-		conn, err := net.Dial("tcp", server.Host)
+		addr, err := net.ResolveTCPAddr("tcp", server.Host)
+		s.Servers[i].tcpAddr = addr
 		if err != nil {
+			server.speedtest.Printf("%s\n", err.Error())
+			continue
+		}
+
+		conn, err := dialTimeout("tcp", server.speedtest.Source, addr, server.speedtest.Timeout)
+		if err != nil {
+			server.speedtest.Printf("%s\n", err.Error())
 			continue
 		}
 		conn.Write([]byte("HI\n"))
@@ -343,9 +364,9 @@ func (s *Servers) TestLatency() *Server {
 func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
-	conn, err := net.Dial("tcp", s.Host)
+	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout)
 	if err != nil {
-		errorf("\nCannot connect to %s\n", s.Host)
+		errorf("\nCannot connect to %s\n", s.tcpAddr.String())
 	}
 
 	defer conn.Close()
@@ -436,9 +457,9 @@ func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
-	conn, err := net.Dial("tcp", s.Host)
+	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout)
 	if err != nil {
-		errorf("\nCannot connect to %s\n", s.Host)
+		errorf("\nCannot connect to %s\n", s.tcpAddr.String())
 	}
 	conn.Write([]byte("HI\n"))
 	hello := make([]byte, 1024)
@@ -536,7 +557,22 @@ func main() {
 	flag.BoolVar(&speedtest.CliFlags.Simple, "simple", false, "Suppress verbose output, only show basic information")
 	flag.BoolVar(&speedtest.CliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
 	flag.IntVar(&speedtest.CliFlags.Server, "server", 0, "Specify a server ID to test against")
+	flag.StringVar(&speedtest.CliFlags.Source, "source", "", "Source IP address to bind to")
+	flag.Int64Var(&speedtest.CliFlags.Timeout, "timeout", 10, "Timeout in seconds")
 	flag.Parse()
+
+	speedtest.Timeout = time.Duration(speedtest.CliFlags.Timeout) * time.Second
+
+	if speedtest.CliFlags.Source != "" {
+		source, err := net.ResolveTCPAddr("tcp", speedtest.CliFlags.Source+":0")
+		if err != nil {
+			errorf("Could not parse source IP address %s: %s", speedtest.CliFlags.Source, err.Error())
+		} else {
+			speedtest.Source = source
+		}
+	} else {
+		speedtest.Source = nil
+	}
 
 	if speedtest.CliFlags.Json || speedtest.CliFlags.Xml || speedtest.CliFlags.Csv || speedtest.CliFlags.Simple {
 		speedtest.CliFlags.Interactive = false
@@ -573,12 +609,9 @@ func main() {
 
 	speedtest.Printf("Selecting best server based on latency...\n")
 	speedtest.Results.Server = servers.TestLatency()
-	// Give the server access to Speedtest
-	speedtest.Results.Server.speedtest = speedtest
-	// We want latency in ms in results not ns
 	speedtest.Results.Latency = float64(speedtest.Results.Server.Latency.Nanoseconds()) / 1000000.0
 	if speedtest.Results.Server.Latency == 0 {
-		errorf("Unable to test server latency, this may be caused by a connection failure to %s\n", speedtest.Results.Server.Host)
+		errorf("Unable to test server latency, this may be caused by a connection failure")
 	}
 
 	speedtest.Printf("Hosted by %s (%s) [%0.2f km]: %0.2f ms\n", speedtest.Results.Server.Sponsor, speedtest.Results.Server.Name, speedtest.Results.Server.Distance, float64(speedtest.Results.Server.Latency.Nanoseconds())/1000000.0)
