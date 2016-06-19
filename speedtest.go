@@ -48,16 +48,19 @@ type CliFlags struct {
 }
 
 type Speedtest struct {
-	Configuration Configuration
-	Servers       Servers
+	Configuration *Configuration
+	Servers       *Servers
 }
 
-func NewSpeedtest() Speedtest {
-	return Speedtest{}
+func NewSpeedtest() *Speedtest {
+	return &Speedtest{
+		Configuration: &Configuration{},
+		Servers:       &Servers{},
+	}
 }
 
 // Fetch Speedtest.net Configuration
-func (s *Speedtest) GetConfiguration() (Configuration, error) {
+func (s *Speedtest) GetConfiguration() (*Configuration, error) {
 	res, err := http.Get("https://www.speedtest.net/speedtest-config.php")
 	if err != nil {
 		return s.Configuration, errors.New("Error retrieving Speedtest.net configuration")
@@ -69,7 +72,7 @@ func (s *Speedtest) GetConfiguration() (Configuration, error) {
 }
 
 // Fetch Speedtest.net Servers
-func (s *Speedtest) GetServers(serverId int) (Servers, error) {
+func (s *Speedtest) GetServers(serverId int) (*Servers, error) {
 	res, err := http.Get("https://www.speedtest.net/speedtest-servers.php")
 	if err != nil {
 		return s.Servers, errors.New("Error retrieving Speedtest.net servers")
@@ -85,7 +88,7 @@ func (s *Speedtest) GetServers(serverId int) (Servers, error) {
 			}
 		}
 	} else {
-		s.Servers = allServers
+		s.Servers = &allServers
 	}
 
 	return s.Servers, nil
@@ -202,7 +205,7 @@ func (s *serverSorter) Less(i, j int) bool {
 }
 
 // Tests the 5 closest servers latency, and returns the server with lowest latency
-func (s *Servers) TestLatency() Server {
+func (s *Servers) TestLatency() *Server {
 	var servers []Server
 	s.SortServersByDistance()
 
@@ -233,7 +236,7 @@ func (s *Servers) TestLatency() Server {
 		s.Servers[i].Latency = sum / 3
 	}
 	s.SortServersByLatency()
-	return s.Servers[0]
+	return &s.Servers[0]
 }
 
 func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup) {
