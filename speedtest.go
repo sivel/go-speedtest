@@ -40,6 +40,10 @@ import (
 	"github.com/kellydunn/golang-geo"
 )
 
+const (
+	version = "0.0.1"
+)
+
 // Helper function to make it easier for printing and exiting
 func errorf(text string, a ...interface{}) {
 	if !strings.HasSuffix(text, "\n") {
@@ -71,6 +75,7 @@ type CliFlags struct {
 	Source      string
 	Timeout     int64
 	Share       bool
+	Version     bool
 }
 
 func NewCliFlags() *CliFlags {
@@ -590,6 +595,11 @@ options:
 	os.Exit(2)
 }
 
+func printVersion() {
+	fmt.Println(version)
+	os.Exit(0)
+}
+
 func main() {
 	speedtest := NewSpeedtest()
 
@@ -600,10 +610,15 @@ func main() {
 	flag.BoolVar(&speedtest.CliFlags.Simple, "simple", false, "Suppress verbose output, only show basic information")
 	flag.BoolVar(&speedtest.CliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
 	flag.BoolVar(&speedtest.CliFlags.Share, "share", false, "Generate and provide a URL to the speedtest.net share results image")
+	flag.BoolVar(&speedtest.CliFlags.Version, "version", false, "Show the version number and exit")
 	flag.IntVar(&speedtest.CliFlags.Server, "server", 0, "Specify a server ID to test against")
 	flag.StringVar(&speedtest.CliFlags.Source, "source", "", "Source IP address to bind to")
 	flag.Int64Var(&speedtest.CliFlags.Timeout, "timeout", 10, "Timeout in seconds")
 	flag.Parse()
+
+	if speedtest.CliFlags.Version {
+		printVersion()
+	}
 
 	speedtest.Timeout = time.Duration(speedtest.CliFlags.Timeout) * time.Second
 
