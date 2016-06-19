@@ -583,7 +583,7 @@ func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 }
 
 func usage() {
-	fmt.Printf(`usage: %s [options]
+	fmt.Fprintf(os.Stderr, `usage: %s [options]
 
 Command line interface for testing internet bandwidth using speedtest.net.
 --------------------------------------------------------------------------
