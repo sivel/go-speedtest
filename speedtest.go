@@ -16,6 +16,8 @@
 package main
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"flag"
@@ -28,6 +30,7 @@ import (
 	"path"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +38,7 @@ import (
 	"github.com/kellydunn/golang-geo"
 )
 
+// Helper function to make it easier for printing and exiting
 func errorf(text string, a ...interface{}) {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
@@ -44,20 +48,104 @@ func errorf(text string, a ...interface{}) {
 }
 
 type CliFlags struct {
-	List   bool
-	Server int
+	List        bool
+	Server      int
+	Interactive bool // Not a direct flag, this is derived from whether a user has or has not selected a machine readable output
+	Json        bool
+	Xml         bool
+	Csv         bool
+	Simple      bool
+}
+
+func NewCliFlags() *CliFlags {
+	return &CliFlags{
+		Interactive: true,
+	}
+}
+
+type Results struct {
+	XMLName   xml.Name  `json:"-" xml:"results"`
+	Download  float64   `json:"download" xml:"download"`
+	Upload    float64   `json:"upload" xml:"upload"`
+	Latency   float64   `json:"latency" xml:"latency"`
+	Server    *Server   `json:"server" xml:"server"`
+	Timestamp time.Time `json:"timestamp" xml:"timestamp"`
+	Share     string    `json:"share" xml:"share"`
+}
+
+func NewResults() *Results {
+	return &Results{
+		Timestamp: time.Now(),
+	}
+}
+
+// Marshall results to JSON and print
+func (r *Results) ToJson() {
+	out, err := json.MarshalIndent(r, "", "    ")
+	if err != nil {
+		errorf(err.Error())
+	}
+	fmt.Println(string(out))
+}
+
+// Marshal results to XML and print
+func (r *Results) ToXml() {
+	out, err := xml.MarshalIndent(r, "", "    ")
+	if err != nil {
+		errorf(err.Error())
+	}
+	fmt.Printf("%s%s", xml.Header, string(out))
+}
+
+// Output results as CSV
+// Format is:
+//    ID,Sponsor,Name,Timestamp,Distance (km),Latency (ms),Download (bits/s),Upload (bits/s)
+func (r *Results) ToCsv() {
+	record := []string{
+		strconv.Itoa(r.Server.ID),
+		r.Server.Sponsor,
+		r.Server.Name,
+		r.Timestamp.Format(time.RFC3339),
+		strconv.FormatFloat(r.Server.Distance, 'f', -1, 64),
+		strconv.FormatFloat(r.Latency, 'f', -1, 64),
+		strconv.FormatFloat(r.Download, 'f', -1, 64),
+		strconv.FormatFloat(r.Upload, 'f', -1, 64),
+	}
+	w := csv.NewWriter(os.Stdout)
+	w.Write(record)
+	w.Flush()
+}
+
+// Output results in "simple" format
+func (r *Results) ToSimple() {
+	fmt.Printf("Latency: %.02f ms\n", r.Latency)
+	fmt.Printf("Download: %.02f Mbit/s\n", r.Download/1000/1000)
+	fmt.Printf("Upload: %.02f Mbit/s\n", r.Upload/1000/1000)
 }
 
 type Speedtest struct {
 	Configuration *Configuration
 	Servers       *Servers
+	CliFlags      *CliFlags
+	Results       *Results
 }
 
 func NewSpeedtest() *Speedtest {
 	return &Speedtest{
 		Configuration: &Configuration{},
 		Servers:       &Servers{},
+		CliFlags:      NewCliFlags(),
+		Results:       NewResults(),
 	}
+}
+
+// Printf helper that only prints in "interactive" mode
+func (s *Speedtest) Printf(text string, a ...interface{}) {
+	if !s.CliFlags.Interactive {
+		return
+	}
+
+	fmt.Printf(text, a...)
 }
 
 // Fetch Speedtest.net Configuration
@@ -140,18 +228,19 @@ type Configuration struct {
 }
 
 type Server struct {
-	CC        string  `xml:"cc,attr"`
-	Country   string  `xml:"country,attr"`
-	ID        int     `xml:"id,attr"`
-	Latitude  float64 `xml:"lat,attr"`
-	Longitude float64 `xml:"lon,attr"`
-	Name      string  `xml:"name,attr"`
-	Sponsor   string  `xml:"sponsor,attr"`
-	URL       string  `xml:"url,attr"`
-	URL2      string  `xml:"url2,attr"`
-	Host      string  `xml:"host,attr"`
-	Distance  float64
-	Latency   time.Duration
+	CC        string        `xml:"cc,attr" json:"cc"`
+	Country   string        `xml:"country,attr" json:"country"`
+	ID        int           `xml:"id,attr" json:"id"`
+	Latitude  float64       `xml:"lat,attr" json:"lat"`
+	Longitude float64       `xml:"lon,attr" json:"lon"`
+	Name      string        `xml:"name,attr" json:"name"`
+	Sponsor   string        `xml:"sponsor,attr" json:"sponsor"`
+	URL       string        `xml:"url,attr" json:"url"`
+	URL2      string        `xml:"url2,attr" json:"url2"`
+	Host      string        `xml:"host,attr" json:"host"`
+	Distance  float64       `xml:"distance,attr" json:"distance"`
+	Latency   time.Duration `xml:"latency,attr" json:"latency"`
+	speedtest *Speedtest
 }
 
 type Servers struct {
@@ -250,6 +339,7 @@ func (s *Servers) TestLatency() *Server {
 	return &s.Servers[0]
 }
 
+// Goroutine for downloading data
 func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
@@ -269,7 +359,7 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, star
 	var out []int
 
 	for size := range ci {
-		fmt.Printf(".")
+		s.speedtest.Printf(".")
 		remaining := size
 
 		for remaining > 0 && time.Since(start).Seconds() < length {
@@ -297,7 +387,7 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, star
 			remaining -= down
 
 		}
-		fmt.Printf(".")
+		s.speedtest.Printf(".")
 	}
 
 	go func(co chan []int, out []int) {
@@ -306,6 +396,7 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, star
 
 }
 
+// Function that controls Downloader goroutine
 func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
@@ -328,7 +419,7 @@ func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 	wg.Wait()
 
 	total := time.Since(start)
-	fmt.Println()
+	s.speedtest.Printf("\n")
 
 	var totalSize int
 	for i := 0; i < 8; i++ {
@@ -341,6 +432,7 @@ func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 	return float64(totalSize) * 8, total
 }
 
+// Goroutine for uploading data
 func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
@@ -355,7 +447,7 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start 
 	var give int
 	var out []int
 	for size := range ci {
-		fmt.Printf(".")
+		s.speedtest.Printf(".")
 		remaining := size
 
 		for remaining > 0 && time.Since(start).Seconds() < length {
@@ -375,7 +467,7 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start 
 			out = append(out, give)
 			remaining -= give
 		}
-		fmt.Printf(".")
+		s.speedtest.Printf(".")
 	}
 
 	go func(co chan []int, out []int) {
@@ -384,6 +476,7 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start 
 
 }
 
+// Function that controls Uploader goroutine
 func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
@@ -407,7 +500,7 @@ func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 	wg.Wait()
 
 	total := time.Since(start)
-	fmt.Println()
+	s.speedtest.Printf("\n")
 
 	var totalSize int
 	for i := 0; i < 8; i++ {
@@ -434,28 +527,34 @@ options:
 }
 
 func main() {
-	cliFlags := &CliFlags{}
+	speedtest := NewSpeedtest()
 
 	flag.Usage = usage
-	flag.BoolVar(&cliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
-	flag.IntVar(&cliFlags.Server, "server", 0, "Specify a server ID to test against")
+	flag.BoolVar(&speedtest.CliFlags.Json, "json", false, "Suppress verbose output, only show basic information in JSON format")
+	flag.BoolVar(&speedtest.CliFlags.Xml, "xml", false, "Suppress verbose output, only show basic information in XML format")
+	flag.BoolVar(&speedtest.CliFlags.Csv, "csv", false, "Suppress verbose output, only show basic information in CSV format")
+	flag.BoolVar(&speedtest.CliFlags.Simple, "simple", false, "Suppress verbose output, only show basic information")
+	flag.BoolVar(&speedtest.CliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
+	flag.IntVar(&speedtest.CliFlags.Server, "server", 0, "Specify a server ID to test against")
 	flag.Parse()
 
-	speedtest := NewSpeedtest()
+	if speedtest.CliFlags.Json || speedtest.CliFlags.Xml || speedtest.CliFlags.Csv || speedtest.CliFlags.Simple {
+		speedtest.CliFlags.Interactive = false
+	}
 
 	// ALL THE CPUS!
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	fmt.Println("Retrieving speedtest.net configuration...")
+	speedtest.Printf("Retrieving speedtest.net configuration...\n")
 	config, err := speedtest.GetConfiguration()
 	if err != nil {
 		errorf(err.Error())
 	}
 
-	fmt.Printf("Testing from %s (%s)...\n", config.Client.ISP, config.Client.IP)
+	speedtest.Printf("Testing from %s (%s)...\n", config.Client.ISP, config.Client.IP)
 
-	fmt.Println("Retrieving speedtest.net server list...")
-	servers, err := speedtest.GetServers(cliFlags.Server)
+	speedtest.Printf("Retrieving speedtest.net server list...\n")
+	servers, err := speedtest.GetServers(speedtest.CliFlags.Server)
 	if err != nil {
 		errorf(err.Error())
 	} else if len(servers.Servers) == 0 {
@@ -464,25 +563,43 @@ func main() {
 
 	servers.SetDistances(config.Client.Latitude, config.Client.Longitude)
 
-	if cliFlags.List {
+	if speedtest.CliFlags.List {
 		servers.SortServersByDistance()
 		for _, server := range servers.Servers {
-			fmt.Printf("%5d) %s (%s, %s) [%0.2f km]\n", server.ID, server.Sponsor, server.Name, server.Country, server.Distance)
+			speedtest.Printf("%5d) %s (%s, %s) [%0.2f km]\n", server.ID, server.Sponsor, server.Name, server.Country, server.Distance)
 		}
 		os.Exit(0)
 	}
 
-	fmt.Println("Selecting best server based on ping...")
-	bestServer := servers.TestLatency()
-	if bestServer.Latency == 0 {
-		errorf("Unable to test server latency, this may be caused by a connection failure to %s\n", bestServer.Host)
+	speedtest.Printf("Selecting best server based on latency...\n")
+	speedtest.Results.Server = servers.TestLatency()
+	// Give the server access to Speedtest
+	speedtest.Results.Server.speedtest = speedtest
+	// We want latency in ms in results not ns
+	speedtest.Results.Latency = float64(speedtest.Results.Server.Latency.Nanoseconds()) / 1000000.0
+	if speedtest.Results.Server.Latency == 0 {
+		errorf("Unable to test server latency, this may be caused by a connection failure to %s\n", speedtest.Results.Server.Host)
 	}
 
-	fmt.Printf("Hosted by %s (%s) [%0.2f km]: %0.2f ms\n", bestServer.Sponsor, bestServer.Name, bestServer.Distance, float64(bestServer.Latency.Nanoseconds())/1000000.0)
-	fmt.Printf("Testing Download Speed")
-	downBits, downDuration := bestServer.TestDownload(config.Download.Length)
-	fmt.Printf("Download: %0.2f Mbit/s\n", downBits/1000/1000/downDuration.Seconds())
-	fmt.Printf("Testing Upload Speed")
-	upBits, upDuration := bestServer.TestUpload(config.Upload.Length)
-	fmt.Printf("Upload: %0.2f Mbit/s\n", upBits/1000/1000/upDuration.Seconds())
+	speedtest.Printf("Hosted by %s (%s) [%0.2f km]: %0.2f ms\n", speedtest.Results.Server.Sponsor, speedtest.Results.Server.Name, speedtest.Results.Server.Distance, float64(speedtest.Results.Server.Latency.Nanoseconds())/1000000.0)
+
+	speedtest.Printf("Testing Download Speed")
+	downBits, downDuration := speedtest.Results.Server.TestDownload(config.Download.Length)
+	speedtest.Results.Download = downBits / downDuration.Seconds()
+	speedtest.Printf("Download: %0.2f Mbit/s\n", speedtest.Results.Download/1000/1000)
+
+	speedtest.Printf("Testing Upload Speed")
+	upBits, upDuration := speedtest.Results.Server.TestUpload(config.Upload.Length)
+	speedtest.Results.Upload = upBits / upDuration.Seconds()
+	speedtest.Printf("Upload: %0.2f Mbit/s\n", speedtest.Results.Upload/1000/1000)
+
+	if speedtest.CliFlags.Json {
+		speedtest.Results.ToJson()
+	} else if speedtest.CliFlags.Xml {
+		speedtest.Results.ToXml()
+	} else if speedtest.CliFlags.Csv {
+		speedtest.Results.ToCsv()
+	} else if speedtest.CliFlags.Simple {
+		speedtest.Results.ToSimple()
+	}
 }
