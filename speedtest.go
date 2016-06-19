@@ -18,6 +18,7 @@ package main
 import (
 	"encoding/xml"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -39,6 +40,11 @@ func errorf(text string, a ...interface{}) {
 	}
 	fmt.Printf(text, a...)
 	os.Exit(1)
+}
+
+type CliFlags struct {
+	List   bool
+	Server int
 }
 
 type Speedtest struct {
@@ -63,14 +69,25 @@ func (s *Speedtest) GetConfiguration() (Configuration, error) {
 }
 
 // Fetch Speedtest.net Servers
-func (s *Speedtest) GetServers() (Servers, error) {
+func (s *Speedtest) GetServers(serverId int) (Servers, error) {
 	res, err := http.Get("https://www.speedtest.net/speedtest-servers.php")
 	if err != nil {
 		return s.Servers, errors.New("Error retrieving Speedtest.net servers")
 	}
 	serversBody, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	xml.Unmarshal(serversBody, &s.Servers)
+	var allServers Servers
+	xml.Unmarshal(serversBody, &allServers)
+	if serverId != 0 {
+		for _, server := range allServers.Servers {
+			if server.ID == serverId {
+				s.Servers.Servers = append(s.Servers.Servers, server)
+			}
+		}
+	} else {
+		s.Servers = allServers
+	}
+
 	return s.Servers, nil
 }
 
@@ -120,8 +137,8 @@ type Configuration struct {
 
 type Server struct {
 	CC        string  `xml:"cc,attr"`
-	Country   string  `xml:"country:attr"`
-	ID        string  `xml:"id,attr"`
+	Country   string  `xml:"country,attr"`
+	ID        int     `xml:"id,attr"`
 	Latitude  float64 `xml:"lat,attr"`
 	Longitude float64 `xml:"lon,attr"`
 	Name      string  `xml:"name,attr"`
@@ -186,8 +203,16 @@ func (s *serverSorter) Less(i, j int) bool {
 
 // Tests the 5 closest servers latency, and returns the server with lowest latency
 func (s *Servers) TestLatency() Server {
+	var servers []Server
 	s.SortServersByDistance()
-	for i, server := range s.Servers[:5] {
+
+	if len(s.Servers) >= 5 {
+		servers = s.Servers[:5]
+	} else {
+		servers = s.Servers[:len(s.Servers)]
+	}
+
+	for i, server := range servers {
 		conn, err := net.Dial("tcp", server.Host)
 		if err != nil {
 			continue
@@ -380,6 +405,12 @@ func (s *Server) TestUpload() (float64, time.Duration) {
 }
 
 func main() {
+	cliFlags := &CliFlags{}
+
+	flag.BoolVar(&cliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
+	flag.IntVar(&cliFlags.Server, "server", 0, "Specify a server ID to test against")
+	flag.Parse()
+
 	speedtest := NewSpeedtest()
 
 	// ALL THE CPUS!
@@ -394,9 +425,11 @@ func main() {
 	fmt.Printf("Testing from %s (%s)...\n", config.Client.ISP, config.Client.IP)
 
 	fmt.Println("Retrieving speedtest.net server list...")
-	servers, err := speedtest.GetServers()
+	servers, err := speedtest.GetServers(cliFlags.Server)
 	if err != nil {
 		errorf(err.Error())
+	} else if len(servers.Servers) == 0 {
+		errorf("Failed to retrieve servers or invalid server ID specified")
 	}
 
 	me := geo.NewPoint(config.Client.Latitude, config.Client.Longitude)
@@ -405,6 +438,14 @@ func main() {
 		serverPoint := geo.NewPoint(server.Latitude, server.Longitude)
 		distance := me.GreatCircleDistance(serverPoint)
 		servers.Servers[i].Distance = distance
+	}
+
+	if cliFlags.List {
+		servers.SortServersByDistance()
+		for _, server := range servers.Servers {
+			fmt.Printf("%5d) %s (%s, %s) [%0.2f km]\n", server.ID, server.Sponsor, server.Name, server.Country, server.Distance)
+		}
+		os.Exit(0)
 	}
 
 	fmt.Println("Selecting best server based on ping...")
