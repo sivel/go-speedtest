@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"runtime"
 	"sort"
 	"strings"
@@ -419,9 +420,23 @@ func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 	return float64(totalSize) * 8, total
 }
 
+func usage() {
+	fmt.Printf(`usage: %s [options]
+
+Command line interface for testing internet bandwidth using speedtest.net.
+--------------------------------------------------------------------------
+https://github.com/sivel/go-speedtest
+
+options:
+`, path.Base(os.Args[0]))
+	flag.PrintDefaults()
+	os.Exit(2)
+}
+
 func main() {
 	cliFlags := &CliFlags{}
 
+	flag.Usage = usage
 	flag.BoolVar(&cliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
 	flag.IntVar(&cliFlags.Server, "server", 0, "Specify a server ID to test against")
 	flag.Parse()
