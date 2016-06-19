@@ -204,6 +204,16 @@ func (s *serverSorter) Less(i, j int) bool {
 	return s.by(&s.servers[i], &s.servers[j])
 }
 
+// Calculates the distance to all servers
+func (s *Servers) SetDistances(latitude, longitude float64) {
+	me := geo.NewPoint(latitude, longitude)
+	for i, server := range s.Servers {
+		serverPoint := geo.NewPoint(server.Latitude, server.Longitude)
+		distance := me.GreatCircleDistance(serverPoint)
+		s.Servers[i].Distance = distance
+	}
+}
+
 // Tests the 5 closest servers latency, and returns the server with lowest latency
 func (s *Servers) TestLatency() *Server {
 	var servers []Server
@@ -435,13 +445,7 @@ func main() {
 		errorf("Failed to retrieve servers or invalid server ID specified")
 	}
 
-	me := geo.NewPoint(config.Client.Latitude, config.Client.Longitude)
-
-	for i, server := range servers.Servers {
-		serverPoint := geo.NewPoint(server.Latitude, server.Longitude)
-		distance := me.GreatCircleDistance(serverPoint)
-		servers.Servers[i].Distance = distance
-	}
+	servers.SetDistances(config.Client.Latitude, config.Client.Longitude)
 
 	if cliFlags.List {
 		servers.SortServersByDistance()
