@@ -378,6 +378,9 @@ func (s *Servers) TestLatency() *Server {
 			server.speedtest.Printf("%s\n", err.Error())
 			continue
 		}
+
+		defer conn.Close()
+
 		conn.Write([]byte("HI\n"))
 		hello := make([]byte, 1024)
 		conn.Read(hello)
@@ -498,6 +501,9 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start 
 	if err != nil {
 		errorf("\nCannot connect to %s\n", s.tcpAddr.String())
 	}
+
+	defer conn.Close()
+
 	conn.Write([]byte("HI\n"))
 	hello := make([]byte, 1024)
 	conn.Read(hello)
