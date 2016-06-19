@@ -116,17 +116,17 @@ type Times struct {
 }
 
 type Download struct {
-	Length       int `xml:"testlength,attr"`
-	PacketLength int `xml:"packetlength,attr"`
+	Length       float64 `xml:"testlength,attr"`
+	PacketLength int     `xml:"packetlength,attr"`
 }
 
 type Upload struct {
-	Length       int `xml:"testlength,attr"`
-	PacketLength int `xml:"packetlength,attr"`
+	Length       float64 `xml:"testlength,attr"`
+	PacketLength int     `xml:"packetlength,attr"`
 }
 
 type Latency struct {
-	Length int `xml:"testlength,attr"`
+	Length float64 `xml:"testlength,attr"`
 }
 
 type Configuration struct {
@@ -249,7 +249,7 @@ func (s *Servers) TestLatency() *Server {
 	return &s.Servers[0]
 }
 
-func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup) {
+func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
 	conn, err := net.Dial("tcp", s.Host)
@@ -271,7 +271,7 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup) {
 		fmt.Printf(".")
 		remaining := size
 
-		for remaining > 0 {
+		for remaining > 0 && time.Since(start).Seconds() < length {
 
 			if remaining > 1000000 {
 				ask = 1000000
@@ -305,17 +305,18 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup) {
 
 }
 
-func (s *Server) TestDownload() (float64, time.Duration) {
+func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go s.Downloader(ci, co, wg)
-	}
-
 	sizes := []int{245388, 505544, 1118012, 1986284, 4468241, 7907740, 12407926, 17816816, 24262167, 31625365}
 	start := time.Now()
+
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go s.Downloader(ci, co, wg, start, length)
+	}
+
 	for _, size := range sizes {
 		for i := 0; i < 4; i++ {
 			ci <- size
@@ -339,7 +340,7 @@ func (s *Server) TestDownload() (float64, time.Duration) {
 	return float64(totalSize) * 8, total
 }
 
-func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup) {
+func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
 	defer wg.Done()
 
 	conn, err := net.Dial("tcp", s.Host)
@@ -356,7 +357,7 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup) {
 		fmt.Printf(".")
 		remaining := size
 
-		for remaining > 0 {
+		for remaining > 0 && time.Since(start).Seconds() < length {
 			if remaining > 100000 {
 				give = 100000
 			} else {
@@ -382,17 +383,18 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup) {
 
 }
 
-func (s *Server) TestUpload() (float64, time.Duration) {
+func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go s.Uploader(ci, co, wg)
-	}
-
 	sizes := []int{32768, 65536, 131072, 262144, 524288, 1048576, 7340032}
 	start := time.Now()
+
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go s.Uploader(ci, co, wg, start, length)
+	}
+
 	var tmp int
 	for _, size := range sizes {
 		for i := 0; i < 4; i++ {
@@ -463,9 +465,9 @@ func main() {
 
 	fmt.Printf("Hosted by %s (%s) [%0.2f km]: %0.2f ms\n", bestServer.Sponsor, bestServer.Name, bestServer.Distance, float64(bestServer.Latency.Nanoseconds())/1000000.0)
 	fmt.Printf("Testing Download Speed")
-	downBits, downDuration := bestServer.TestDownload()
+	downBits, downDuration := bestServer.TestDownload(config.Download.Length)
 	fmt.Printf("Download: %0.2f Mbit/s\n", downBits/1000/1000/downDuration.Seconds())
 	fmt.Printf("Testing Upload Speed")
-	upBits, upDuration := bestServer.TestUpload()
+	upBits, upDuration := bestServer.TestUpload(config.Upload.Length)
 	fmt.Printf("Upload: %0.2f Mbit/s\n", upBits/1000/1000/upDuration.Seconds())
 }
