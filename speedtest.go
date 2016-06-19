@@ -16,6 +16,7 @@
 package main
 
 import (
+	"crypto/md5"
 	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
@@ -26,6 +27,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"runtime"
@@ -68,6 +70,7 @@ type CliFlags struct {
 	Simple      bool
 	Source      string
 	Timeout     int64
+	Share       bool
 }
 
 func NewCliFlags() *CliFlags {
@@ -136,6 +139,40 @@ func (r *Results) ToSimple() {
 	fmt.Printf("Upload: %.02f Mbit/s\n", r.Upload/1000/1000)
 }
 
+func (r *Results) ToPng() {
+	kDownload := strconv.FormatFloat(r.Download/1000, 'f', 0, 64)
+	kUpload := strconv.FormatFloat(r.Upload/1000, 'f', 0, 64)
+	latency := strconv.FormatFloat(r.Latency, 'f', 0, 64)
+	hashData := []byte(fmt.Sprintf("%s-%s-%s-297aae72", latency, kUpload, kDownload))
+	hash := fmt.Sprintf("%x", md5.Sum(hashData))
+
+	form := url.Values{}
+	form.Add("download", kDownload)
+	form.Add("ping", latency)
+	form.Add("upload", kUpload)
+	form.Add("promo", "")
+	form.Add("startmode", "pingselect")
+	form.Add("recommendedserverid", strconv.Itoa(r.Server.ID))
+	form.Add("accuracy", "1")
+	form.Add("serverid", strconv.Itoa(r.Server.ID))
+	form.Add("hash", hash)
+
+	req, _ := http.NewRequest("POST", "https://www.speedtest.net/api/api.php", strings.NewReader(form.Encode()))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", "http://c.speedtest.net/flash/speedtest.swf")
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		r.Share = "Could not submit results to: " + err.Error()
+	}
+
+	defer res.Body.Close()
+	resBody, _ := ioutil.ReadAll(res.Body)
+	qsValues, _ := url.ParseQuery(string(resBody))
+	r.Share = fmt.Sprintf("http://www.speedtest.net/result/%s.png", qsValues.Get("resultid"))
+	r.Server.speedtest.Printf("Share results: %s", r.Share)
+}
+
 type Speedtest struct {
 	Configuration *Configuration
 	Servers       *Servers
@@ -169,8 +206,8 @@ func (s *Speedtest) GetConfiguration() (*Configuration, error) {
 	if err != nil {
 		return s.Configuration, errors.New("Error retrieving Speedtest.net configuration")
 	}
+	defer res.Body.Close()
 	settingsBody, _ := ioutil.ReadAll(res.Body)
-	res.Body.Close()
 	xml.Unmarshal(settingsBody, &s.Configuration)
 	return s.Configuration, nil
 }
@@ -181,8 +218,8 @@ func (s *Speedtest) GetServers(serverId int) (*Servers, error) {
 	if err != nil {
 		return s.Servers, errors.New("Error retrieving Speedtest.net servers")
 	}
+	defer res.Body.Close()
 	serversBody, _ := ioutil.ReadAll(res.Body)
-	res.Body.Close()
 	var allServers Servers
 	xml.Unmarshal(serversBody, &allServers)
 	for _, server := range allServers.Servers {
@@ -556,6 +593,7 @@ func main() {
 	flag.BoolVar(&speedtest.CliFlags.Csv, "csv", false, "Suppress verbose output, only show basic information in CSV format")
 	flag.BoolVar(&speedtest.CliFlags.Simple, "simple", false, "Suppress verbose output, only show basic information")
 	flag.BoolVar(&speedtest.CliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
+	flag.BoolVar(&speedtest.CliFlags.Share, "share", false, "Generate and provide a URL to the speedtest.net share results image")
 	flag.IntVar(&speedtest.CliFlags.Server, "server", 0, "Specify a server ID to test against")
 	flag.StringVar(&speedtest.CliFlags.Source, "source", "", "Source IP address to bind to")
 	flag.Int64Var(&speedtest.CliFlags.Timeout, "timeout", 10, "Timeout in seconds")
@@ -625,6 +663,10 @@ func main() {
 	upBits, upDuration := speedtest.Results.Server.TestUpload(config.Upload.Length)
 	speedtest.Results.Upload = upBits / upDuration.Seconds()
 	speedtest.Printf("Upload: %0.2f Mbit/s\n", speedtest.Results.Upload/1000/1000)
+
+	if speedtest.CliFlags.Share {
+		speedtest.Results.ToPng()
+	}
 
 	if speedtest.CliFlags.Json {
 		speedtest.Results.ToJson()
