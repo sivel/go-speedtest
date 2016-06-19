@@ -587,7 +587,7 @@ func usage() {
 
 Command line interface for testing internet bandwidth using speedtest.net.
 --------------------------------------------------------------------------
-https://github.com/sivel/go-speedtest
+https://github.com/sivel/speedtest
 
 options:
 `, path.Base(os.Args[0]))

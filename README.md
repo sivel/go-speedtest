@@ -1,6 +1,8 @@
-# go-speedtest
+# speedtest
 
-Go Command line interface for testing internet bandwidth using speedtest.net
+Command line interface for testing internet bandwidth using speedtest.net written in Go.
+
+This application utilizes the pure socket communication in current use by speedtest.net instead of the older HTTP based tests.
 
 ## Usage
 
