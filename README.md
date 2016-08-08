@@ -4,6 +4,8 @@ Command line interface for testing internet bandwidth using speedtest.net writte
 
 This application utilizes the pure socket communication in current use by speedtest.net instead of the older HTTP based tests.
 
+This project is still in development and should be considered experimental, see https://github.com/sivel/speedtest-cli for a stable command line client.
+
 ## Usage
 
 ```
@@ -11,7 +13,7 @@ usage: speedtest [options]
 
 Command line interface for testing internet bandwidth using speedtest.net.
 --------------------------------------------------------------------------
-https://github.com/sivel/go-speedtest
+https://github.com/sivel/speedtest
 
 options:
   -csv
