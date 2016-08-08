@@ -209,7 +209,7 @@ func (s *Speedtest) Printf(text string, a ...interface{}) {
 func (s *Speedtest) GetConfiguration() (*Configuration, error) {
 	res, err := http.Get("https://www.speedtest.net/speedtest-config.php")
 	if err != nil {
-		return s.Configuration, errors.New("Error retrieving Speedtest.net configuration")
+		return s.Configuration, errors.New("Error retrieving Speedtest.net configuration: " + err.Error())
 	}
 	defer res.Body.Close()
 	settingsBody, _ := ioutil.ReadAll(res.Body)
@@ -221,7 +221,7 @@ func (s *Speedtest) GetConfiguration() (*Configuration, error) {
 func (s *Speedtest) GetServers(serverId int) (*Servers, error) {
 	res, err := http.Get("https://www.speedtest.net/speedtest-servers.php")
 	if err != nil {
-		return s.Servers, errors.New("Error retrieving Speedtest.net servers")
+		return s.Servers, errors.New("Error retrieving Speedtest.net servers: " + err.Error())
 	}
 	defer res.Body.Close()
 	serversBody, _ := ioutil.ReadAll(res.Body)
