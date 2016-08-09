@@ -6,6 +6,10 @@ This application utilizes the pure socket communication in current use by speedt
 
 This project is still in development and should be considered experimental, see https://github.com/sivel/speedtest-cli for a stable command line client.
 
+## Download
+
+Downloads are available from the [releases page](https://github.com/sivel/speedtest/releases).
+
 ## Usage
 
 ```
@@ -37,3 +41,13 @@ options:
   -xml
     Suppress verbose output, only show basic information in XML format
 ```
+
+## Troubleshooting
+
+#### Port Restrictions
+
+This application will typically communicate via tcp/443 (HTTPS) and tcp/8080.
+
+tcp/443 is be used for obtaining the speedtest.net configuration and server lists.
+
+tcp/8080 is used for socket communication with the speedtest.net test servers. This is a custom protocol and not HTTP based.
