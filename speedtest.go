@@ -41,7 +41,7 @@ import (
 )
 
 const (
-	version = "0.0.1"
+	version = "0.0.2"
 )
 
 // Helper function to make it easier for printing and exiting
@@ -165,6 +165,7 @@ func (r *Results) ToPng() {
 	req, _ := http.NewRequest("POST", "https://www.speedtest.net/api/api.php", strings.NewReader(form.Encode()))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", "http://c.speedtest.net/flash/speedtest.swf")
+	req.Header.Set("User-Agent", r.Server.speedtest.UserAgent())
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
@@ -205,9 +206,24 @@ func (s *Speedtest) Printf(text string, a ...interface{}) {
 	fmt.Printf(text, a...)
 }
 
+func (s *Speedtest) UserAgent() string {
+	ua := []string{
+		"Mozilla/5.0",
+		fmt.Sprintf("(%s; U; %s; en-us)", strings.Title(runtime.GOOS), runtime.GOARCH),
+		runtime.Version(),
+		"(KHTML, like Gecko)",
+		"speedtest/" + version,
+	}
+	return strings.Join(ua, " ")
+}
+
 // Fetch Speedtest.net Configuration
 func (s *Speedtest) GetConfiguration() (*Configuration, error) {
-	res, err := http.Get("https://www.speedtest.net/speedtest-config.php")
+	req, err := http.NewRequest("GET", "https://www.speedtest.net/speedtest-config.php", nil)
+	req.Header.Set("User-Agent", s.UserAgent())
+
+	client := &http.Client{}
+	res, err := client.Do(req)
 	if err != nil {
 		return s.Configuration, errors.New("Error retrieving Speedtest.net configuration: " + err.Error())
 	}
@@ -219,7 +235,11 @@ func (s *Speedtest) GetConfiguration() (*Configuration, error) {
 
 // Fetch Speedtest.net Servers
 func (s *Speedtest) GetServers(serverId int) (*Servers, error) {
-	res, err := http.Get("https://www.speedtest.net/speedtest-servers.php")
+	req, err := http.NewRequest("GET", "https://www.speedtest.net/speedtest-servers.php?threads="+s.Configuration.ServerConfig.ThreadCount, nil)
+	req.Header.Set("User-Agent", s.UserAgent())
+
+	client := &http.Client{}
+	res, err := client.Do(req)
 	if err != nil {
 		return s.Servers, errors.New("Error retrieving Speedtest.net servers: " + err.Error())
 	}
