@@ -22,6 +22,8 @@ https://github.com/sivel/speedtest
 options:
   -csv
     Suppress verbose output, only show basic information in CSV format
+  -influx
+      Suppress verbose output, only show basic information in InfluxDB line protocol format    
   -json
     Suppress verbose output, only show basic information in JSON format
   -list
