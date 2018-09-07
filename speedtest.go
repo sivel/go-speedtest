@@ -54,13 +54,23 @@ func errorf(text string, a ...interface{}) {
 }
 
 // Established connection with local address and timeout support
-func dialTimeout(network string, laddr *net.TCPAddr, raddr *net.TCPAddr, timeout time.Duration) (net.Conn, error) {
+func dialTimeout(network string, laddr *net.TCPAddr, raddr *net.TCPAddr, timeout time.Duration, override string) (net.Conn, error) {
 	dialer := &net.Dialer{
 		Timeout:   timeout,
 		LocalAddr: laddr,
 	}
+	var addr string = ""
 
-	conn, err := dialer.Dial(network, raddr.String())
+	if override != "" {
+		// fmt.Println(override)
+		addr = override
+	} else {
+		// fmt.Println(raddr.String())
+		addr = raddr.String()
+	}
+	conn, err := dialer.Dial(network, addr)
+	// conn, err := dialer.Dial(network, "10.50.5.204:8080")
+	// conn, err := dialer.Dial(network, raddr.String())
 	return conn, err
 }
 
@@ -76,6 +86,7 @@ type CliFlags struct {
 	Timeout     int64
 	Share       bool
 	Version     bool
+	Override	string
 }
 
 func NewCliFlags() *CliFlags {
@@ -378,7 +389,7 @@ func (s *Servers) TestLatency() *Server {
 			continue
 		}
 
-		conn, err := dialTimeout("tcp", server.speedtest.Source, addr, server.speedtest.Timeout)
+		conn, err := dialTimeout("tcp", server.speedtest.Source, addr, server.speedtest.Timeout, "")
 		if err != nil {
 			server.speedtest.Printf("%s\n", err.Error())
 			continue
@@ -406,10 +417,10 @@ func (s *Servers) TestLatency() *Server {
 }
 
 // Goroutine for downloading data
-func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
+func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64, override string) {
 	defer wg.Done()
 
-	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout)
+	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout, override)
 	if err != nil {
 		errorf("\nCannot connect to %s\n", s.tcpAddr.String())
 	}
@@ -463,7 +474,7 @@ func (s *Server) Downloader(ci chan int, co chan []int, wg *sync.WaitGroup, star
 }
 
 // Function that controls Downloader goroutine
-func (s *Server) TestDownload(length float64) (float64, time.Duration) {
+func (s *Server) TestDownload(length float64, override string) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
 	wg := new(sync.WaitGroup)
@@ -472,7 +483,7 @@ func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go s.Downloader(ci, co, wg, start, length)
+		go s.Downloader(ci, co, wg, start, length, override)
 	}
 
 	for _, size := range sizes {
@@ -499,10 +510,10 @@ func (s *Server) TestDownload(length float64) (float64, time.Duration) {
 }
 
 // Goroutine for uploading data
-func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64) {
+func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start time.Time, length float64, override string) {
 	defer wg.Done()
 
-	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout)
+	conn, err := dialTimeout("tcp", s.speedtest.Source, s.tcpAddr, s.speedtest.Timeout, override)
 	if err != nil {
 		errorf("\nCannot connect to %s\n", s.tcpAddr.String())
 	}
@@ -546,7 +557,7 @@ func (s *Server) Uploader(ci chan int, co chan []int, wg *sync.WaitGroup, start 
 }
 
 // Function that controls Uploader goroutine
-func (s *Server) TestUpload(length float64) (float64, time.Duration) {
+func (s *Server) TestUpload(length float64, override string) (float64, time.Duration) {
 	ci := make(chan int)
 	co := make(chan []int)
 	wg := new(sync.WaitGroup)
@@ -555,7 +566,7 @@ func (s *Server) TestUpload(length float64) (float64, time.Duration) {
 
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go s.Uploader(ci, co, wg, start, length)
+		go s.Uploader(ci, co, wg, start, length, override)
 	}
 
 	var tmp int
@@ -614,6 +625,7 @@ func main() {
 	flag.IntVar(&speedtest.CliFlags.Server, "server", 0, "Specify a server ID to test against")
 	flag.StringVar(&speedtest.CliFlags.Source, "source", "", "Source IP address to bind to")
 	flag.Int64Var(&speedtest.CliFlags.Timeout, "timeout", 10, "Timeout in seconds")
+	flag.StringVar(&speedtest.CliFlags.Override, "override", "", "IP address and port to override and use")
 	flag.Parse()
 
 	if speedtest.CliFlags.Version {
@@ -676,12 +688,12 @@ func main() {
 	speedtest.Printf("Hosted by %s (%s) [%0.2f km]: %0.2f ms\n", speedtest.Results.Server.Sponsor, speedtest.Results.Server.Name, speedtest.Results.Server.Distance, float64(speedtest.Results.Server.Latency.Nanoseconds())/1000000.0)
 
 	speedtest.Printf("Testing Download Speed")
-	downBits, downDuration := speedtest.Results.Server.TestDownload(config.Download.Length)
+	downBits, downDuration := speedtest.Results.Server.TestDownload(config.Download.Length, speedtest.CliFlags.Override)
 	speedtest.Results.Download = downBits / downDuration.Seconds()
 	speedtest.Printf("Download: %0.2f Mbit/s\n", speedtest.Results.Download/1000/1000)
 
 	speedtest.Printf("Testing Upload Speed")
-	upBits, upDuration := speedtest.Results.Server.TestUpload(config.Upload.Length)
+	upBits, upDuration := speedtest.Results.Server.TestUpload(config.Upload.Length, speedtest.CliFlags.Override)
 	speedtest.Results.Upload = upBits / upDuration.Seconds()
 	speedtest.Printf("Upload: %0.2f Mbit/s\n", speedtest.Results.Upload/1000/1000)
 
