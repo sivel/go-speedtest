@@ -71,7 +71,7 @@ type CliFlags struct {
 	Json        bool
 	Xml         bool
 	Csv         bool
-	InfluxDB	bool
+	InfluxDB    bool
 	Simple      bool
 	Source      string
 	Timeout     int64
@@ -141,7 +141,7 @@ func (r *Results) ToInfluxDB() {
 		",upload=",
 		strconv.FormatFloat(r.Upload, 'f', -1, 64),
 	}
-	fmt.Print(strings.Join(record,""))
+	fmt.Print(strings.Join(record, ""))
 }
 
 // Output results as CSV
