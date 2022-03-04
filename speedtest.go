@@ -71,6 +71,7 @@ type CliFlags struct {
 	Json        bool
 	Xml         bool
 	Csv         bool
+	InfluxDB    bool
 	Simple      bool
 	Source      string
 	Timeout     int64
@@ -116,6 +117,31 @@ func (r *Results) ToXml() {
 		errorf(err.Error())
 	}
 	fmt.Printf("%s%s", xml.Header, string(out))
+}
+
+// Output results as InfluxDB line protocol data
+func (r *Results) ToInfluxDB() {
+	record := []string{
+		"speedtest",
+		" ",
+		"serverid=",
+		strconv.Itoa(r.Server.ID),
+		",server_sponsor=\"",
+		r.Server.Sponsor,
+		"\",server_name=\"",
+		r.Server.Name,
+		"\",timestamp=",
+		r.Timestamp.Format(time.RFC3339),
+		",server_distance=",
+		strconv.FormatFloat(r.Server.Distance, 'f', -1, 64),
+		",latency=",
+		strconv.FormatFloat(r.Latency, 'f', -1, 64),
+		",download=",
+		strconv.FormatFloat(r.Download, 'f', -1, 64),
+		",upload=",
+		strconv.FormatFloat(r.Upload, 'f', -1, 64),
+	}
+	fmt.Print(strings.Join(record, ""))
 }
 
 // Output results as CSV
@@ -607,6 +633,7 @@ func main() {
 	flag.BoolVar(&speedtest.CliFlags.Json, "json", false, "Suppress verbose output, only show basic information in JSON format")
 	flag.BoolVar(&speedtest.CliFlags.Xml, "xml", false, "Suppress verbose output, only show basic information in XML format")
 	flag.BoolVar(&speedtest.CliFlags.Csv, "csv", false, "Suppress verbose output, only show basic information in CSV format")
+	flag.BoolVar(&speedtest.CliFlags.InfluxDB, "influx", false, "Suppress verbose output, only show basic information in InfluxDB line protocol format")
 	flag.BoolVar(&speedtest.CliFlags.Simple, "simple", false, "Suppress verbose output, only show basic information")
 	flag.BoolVar(&speedtest.CliFlags.List, "list", false, "Display a list of speedtest.net servers sorted by distance")
 	flag.BoolVar(&speedtest.CliFlags.Share, "share", false, "Generate and provide a URL to the speedtest.net share results image")
@@ -633,7 +660,7 @@ func main() {
 		speedtest.Source = nil
 	}
 
-	if speedtest.CliFlags.Json || speedtest.CliFlags.Xml || speedtest.CliFlags.Csv || speedtest.CliFlags.Simple {
+	if speedtest.CliFlags.Json || speedtest.CliFlags.Xml || speedtest.CliFlags.Csv || speedtest.CliFlags.InfluxDB || speedtest.CliFlags.Simple {
 		speedtest.CliFlags.Interactive = false
 	}
 
@@ -695,6 +722,8 @@ func main() {
 		speedtest.Results.ToXml()
 	} else if speedtest.CliFlags.Csv {
 		speedtest.Results.ToCsv()
+	} else if speedtest.CliFlags.InfluxDB {
+		speedtest.Results.ToInfluxDB()
 	} else if speedtest.CliFlags.Simple {
 		speedtest.Results.ToSimple()
 	}
