@@ -1,4 +1,4 @@
-module github.com/sivel/speedtest
+module github.com/sivel/go-speedtest
 
 go 1.17
 
